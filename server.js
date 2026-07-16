@@ -1,6 +1,8 @@
 const { createServer } = require("node:http");
 const bcrypt = require("bcryptjs");
 const pool = require("./db.js");
+const jwt = require("jsonwebtoken");
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const PORT = process.env.PORT || 3000;
 
@@ -88,6 +90,97 @@ const server = createServer(async (req, res) => {
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(result.rows[0]));
+    } catch (err) {
+      console.error(err);
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Internal error" }));
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/login") {
+    try {
+      const data = await readBody(req);
+
+      if (!data.email || !data.password) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Email and password are required" }));
+        return;
+      }
+
+      const result = await pool.query(
+        "SELECT id, email, password FROM users WHERE email = $1",
+        [data.email],
+      );
+
+      const user = result.rows[0];
+
+      if (!user || !(await bcrypt.compare(data.password, user.password))) {
+        res.statusCode = 401;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Invalid credentials" }));
+        return;
+      }
+
+      const token = jwt.sign(
+        { userId: user.id, email: user.email },
+        JWT_SECRET,
+        { expiresIn: "7d" },
+      );
+
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ token }));
+    } catch (error) {
+      console.error(error);
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Internal error" }));
+    }
+  }
+
+  if (req.method === "GET" && req.url === "/me") {
+    try {
+      const authHeader = req.headers.authorization;
+
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        res.statusCode = 401;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Missing token" }));
+        return;
+      }
+
+      const token = authHeader.slice("Bearer ".length).trim();
+
+      let payload;
+
+      try {
+        payload = jwt.verify(token, JWT_SECRET);
+      } catch (err) {
+        res.statusCode = 401;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Invalid or expired token" }));
+        return;
+      }
+
+      const result = await pool.query(
+        "SELECT id, email, created_at FROM users WHERE id = $1",
+        [payload.userId],
+      );
+
+      const user = result.rows[0];
+
+      if (!user) {
+        res.statusCode = 404;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "user not found" }));
+        return;
+      }
+
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(user));
     } catch (err) {
       console.error(err);
       res.statusCode = 500;
