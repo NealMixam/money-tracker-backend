@@ -28,7 +28,9 @@ async function register(req, res) {
       res.status(409).json({ error: "Email already exists" });
       return;
     }
-    throw error;
+    console.error(error);
+    res.status(500).json({ error: "Server error" });
+    return;
   }
 
   res.status(201).json(result.rows[0]);
@@ -40,21 +42,29 @@ async function login(req, res) {
     return;
   }
 
-  const result = await pool.query(
-    "SELECT id, email, password FROM users WHERE email = $1",
-    [req.body.email],
-  );
+  let token;
 
-  const user = result.rows[0];
+  try {
+    const result = await pool.query(
+      "SELECT id, email, password FROM users WHERE email = $1",
+      [req.body.email],
+    );
 
-  if (!user || !(await bcrypt.compare(req.body.password, user.password))) {
-    res.status(401).json({ error: "Invalid credentials" });
+    const user = result.rows[0];
+
+    if (!user || !(await bcrypt.compare(req.body.password, user.password))) {
+      res.status(401).json({ error: "Invalid credentials" });
+      return;
+    }
+
+    token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, {
+      expiresIn: "7d",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal server error" });
     return;
   }
-
-  const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, {
-    expiresIn: "7d",
-  });
 
   res.status(200).json({ token });
 }
