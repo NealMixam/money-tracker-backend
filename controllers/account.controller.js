@@ -17,20 +17,27 @@ async function createAccount(req, res) {
       [userId, title, currency],
     );
     res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
+    console.error(error);
     res.status(500).json({ error: "Internal server error" });
   }
 }
 
 async function listAccounts(req, res) {
   const userId = req.user.userId;
-  const result = await pool.query(
-    `SELECT id, title, currency, created_at
+
+  try {
+    const result = await pool.query(
+      `SELECT id, title, currency, created_at
      FROM accounts WHERE user_id = $1 ORDER BY created_at`,
-    [userId],
-  );
-  res.json(result.rows);
+      [userId],
+    );
+
+    res.status(201).json(result.rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 }
 
 module.exports = { createAccount, listAccounts };
