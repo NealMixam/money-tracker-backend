@@ -1,6 +1,17 @@
 const pool = require("../db");
+const { isValidAmount } = require("../validation/amount");
+
+const {
+  isValidAccountId,
+  isValidDescription,
+  isValidDate,
+} = require("../validation/transaction");
 
 async function transfer(req, res) {
+  if (req.body == null || typeof req.body !== "object" || Array.isArray(req.body)) {
+    return res.status(400).json({ error: "Request body must be a JSON object" })
+  }
+
   const { fromAccountId, toAccountId, amount, description, date } = req.body;
 
   if (fromAccountId == null || toAccountId == null || amount == null) {
@@ -9,9 +20,13 @@ async function transfer(req, res) {
       .json({ error: "fromAccountId, toAccountId and amount are required" });
   }
 
-  const amt = Number(amount);
-  if (!Number.isFinite(amt) || amt <= 0) {
-    return res.status(400).json({ error: "Amount must be a positive number" });
+  if (
+      !isValidAccountId(fromAccountId) ||
+      !isValidAccountId(toAccountId)
+  ) {
+    return res.status(400).json({
+      error: "fromAccountId and toAccountId must be positive integers",
+    });
   }
 
   if (fromAccountId === toAccountId) {
@@ -19,6 +34,23 @@ async function transfer(req, res) {
       .status(400)
       .json({ error: "Source and destination accounts must be different" });
   }
+
+  if (!isValidAmount(amount)) {
+    return res.status(400).json({ error: "Amount must be a positive decimal string with at most two decimal places and must not exceed 9999999999.99" });
+  }
+
+  const amt = Number(amount);
+
+  if(!isValidDescription(description)) {
+    return res.status(400).json({ error: "Description must be a string of at most 1000 characters" });
+  }
+
+  if (!isValidDate(date)) {
+    return res.status(400).json({ error: "Invalid date" });
+  }
+
+  const trDesc = description ?? "";
+  const trDate = date ?? new Date().toISOString().slice(0, 10);
 
   async function getAccountBalance(accountId, client) {
     const res = await client.query(
@@ -65,9 +97,6 @@ async function transfer(req, res) {
     if (fromBalance < amt) {
       throw new Error("Insufficient funds");
     }
-
-    const trDesc = description ?? "";
-    const trDate = date ?? new Date().toISOString().slice(0, 10);
 
     await client.query(
       "INSERT INTO transactions (account_id, user_id, type, amount, description, date) VALUES ($1, $2, $3, $4, $5, $6)",
