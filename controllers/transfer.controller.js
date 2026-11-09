@@ -65,24 +65,31 @@ async function transfer(req, res) {
   try {
     await client.query("BEGIN");
 
-    const fromRes = await client.query(
-      "SELECT id, user_id FROM accounts WHERE id = $1 FOR UPDATE",
-      [fromAccountId],
-    );
-    const toRes = await client.query(
-      "SELECT id, user_id FROM accounts WHERE id = $1 FOR UPDATE",
-      [toAccountId],
-    );
+    const accountIds = [fromAccountId, toAccountId].sort((a, b) => a - b);
 
-    if (fromRes.rowCount === 0) {
+    const accounts = [];
+
+    for (const accountId of accountIds) {
+      const result = await client.query(
+          "SELECT id, user_id, currency FROM accounts WHERE id = $1 FOR UPDATE",
+          [accountId],
+      );
+
+      if (result.rowCount > 0) {
+        accounts.push(result.rows[0]);
+      }
+    }
+
+    const fromAcc = accounts.find((account) => account.id === fromAccountId);
+    const toAcc = accounts.find((account) => account.id === toAccountId);
+
+    if (!fromAcc) {
       throw new Error("Source account not found");
     }
-    if (toRes.rowCount === 0) {
+
+    if (!toAcc) {
       throw new Error("Destination account not found");
     }
-
-    const fromAcc = fromRes.rows[0];
-    const toAcc = toRes.rows[0];
 
     if (
       fromAcc.user_id !== req.user.userId ||
@@ -91,6 +98,10 @@ async function transfer(req, res) {
       throw new Error(
         "Unauthorized: one or both accounts do not belong to you",
       );
+    }
+
+    if (fromAcc.currency !== toAcc.currency) {
+      throw new Error("Accounts must have the same currency");
     }
 
     const fromBalance = await getAccountBalance(fromAccountId, client);
@@ -125,6 +136,9 @@ async function transfer(req, res) {
     }
     if (err.message.startsWith("Unauthorized")) {
       return res.status(403).json({ error: err.message });
+    }
+    if (err.message.startsWith("Accounts must have the same currency")) {
+      return res.status(400).json({ error: err.message });
     }
     return res.status(500).json({ error: "Internal server error" });
   } finally {
